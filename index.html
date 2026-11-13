@@ -264,7 +264,7 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t, rand=(a,b)=>a+Math.
 const W=400, H=700, CENTER=H/2, GOAL_W=136, PUCK_R=15, RAIL=20;
 const GL=W/2-GOAL_W/2, GR=W/2+GOAL_W/2;
 const PUCK_MAX=1500, FRICTION=0.16, WALL_E=0.9, TOUCH_OFF=48;
-const PLAYER_TYPES={normal:{r:32,speed:2600},small:{r:25,speed:3400},big:{r:42,speed:1900}};
+const PLAYER_TYPES={normal:{r:32,speed:5200},small:{r:25,speed:6800},big:{r:42,speed:3800}};
 const CPU_SIZES={small:{r:25,mult:1.15},medium:{r:32,mult:1},big:{r:42,mult:.82}};
 const LEVELS={
   easy:  {speed:620, react:.22,err:34,predict:false,track:.55,smart:false,home:70,attack:320},
@@ -477,12 +477,14 @@ function rr(x,a,b,w,h,r){x.beginPath();x.moveTo(a+r,b);x.arcTo(a+w,b,a+w,b+h,r);
 /* =====================================================================
    GAME RENDERING
    ===================================================================== */
-const gc=$('#game'),gx=gc.getContext('2d');let LY={},tableImg=null;
+const gc=$('#game'),gx=gc.getContext('2d',{desynchronized:true});let LY={},tableImg=null;
 const COLORS={player:{a:'#7ee8ff',b:'#1aa0f0',c:'#0a4fa8',glow:'rgba(80,200,255,'},cpu:{a:'#ffb0b8',b:'#ff4d5e',c:'#a0122a',glow:'rgba(255,70,100,'}};
 function layout(){
   const dpr=Math.min(2,devicePixelRatio||1),cw=innerWidth,ch=innerHeight,hud=clamp(ch*.085,50,74),pad=10;
-  const s=Math.min((cw-pad*2)/(W+RAIL*2),(ch-hud-pad*2)/(H+RAIL*2));
-  LY={dpr,cw,ch,hud,s,ox:(cw-W*s)/2,oy:hud+pad+((ch-hud-pad*2)-(H+RAIL*2)*s)/2+RAIL*s};
+  const rot=cw>ch*1.05; // wide screen: turn the table sideways (you on the left)
+  const sw=rot?H:W,sh=rot?W:H;
+  const s=Math.min((cw-pad*2)/(sw+RAIL*2),(ch-hud-pad*2)/(sh+RAIL*2));
+  LY={dpr,cw,ch,hud,s,rot,tw:(sw+RAIL*2)*s,ox:(cw-sw*s)/2,oy:hud+pad+((ch-hud-pad*2)-(sh+RAIL*2)*s)/2+RAIL*s};
   gc.width=cw*dpr;gc.height=ch*dpr;gc.style.width=cw+'px';gc.style.height=ch+'px';
   buildTable();
 }
@@ -612,16 +614,16 @@ function txt(x,s,px,py,size,fill,stroke,glow,align='center'){
 function drawBanner(x){
   const b=G.banner;if(!b)return;const age=G.time-b.t0;if(age>b.dur){G.banner=null;return}
   const inT=clamp(age/.18,0,1),outT=clamp((b.dur-age)/.3,0,1),a=Math.min(inT,outT),sc=.6+.4*(1-Math.pow(1-inT,3))+(b.pulse?Math.sin(age*10)*.03:0);
-  x.save();x.globalAlpha=a;x.translate(W/2,b.y||CENTER);x.scale(sc,sc);
+  x.save();x.globalAlpha=a;x.translate(W/2,b.y||CENTER);if(LY.rot)x.rotate(-Math.PI/2);x.scale(sc,sc);const BW=LY.rot?H:W;
   // backing band
-  const g=x.createLinearGradient(-W/2,0,W/2,0);g.addColorStop(0,'rgba(4,18,44,0)');g.addColorStop(.5,'rgba(4,18,44,.6)');g.addColorStop(1,'rgba(4,18,44,0)');
-  x.fillStyle=g;x.fillRect(-W/2,-46,W,b.sub?92:80);
+  const g=x.createLinearGradient(-BW/2,0,BW/2,0);g.addColorStop(0,'rgba(4,18,44,0)');g.addColorStop(.5,'rgba(4,18,44,.6)');g.addColorStop(1,'rgba(4,18,44,0)');
+  x.fillStyle=g;x.fillRect(-BW/2,-46,BW,b.sub?92:80);
   txt(x,b.text,0,b.sub?-10:0,b.size||56,b.fill||'#fff',b.stroke||'#0a2758',b.glow||'rgba(120,210,255,.9)');
   if(b.sub)txt(x,b.sub,0,30,18,'#d6efff','#0a2758',null);
   x.restore();
 }
 function drawHud(x){
-  const {cw,hud}=LY,c=G;const padL=$('#pauseBtn').classList.contains('show')?64:8;let wHud=Math.min(cw-padL-8,Math.max(LY.s*(W+RAIL*2),360)),lx=Math.max(padL,(cw-wHud)/2);
+  const {cw,hud}=LY,c=G;const padL=$('#pauseBtn').classList.contains('show')?64:8;let wHud=Math.min(cw-padL-8,Math.min(820,Math.max(LY.tw,360))),lx=Math.max(padL,(cw-wHud)/2);
   x.save();
   let g=x.createLinearGradient(0,4,0,hud-4);g.addColorStop(0,'rgba(30,80,160,.85)');g.addColorStop(1,'rgba(6,24,60,.9)');
   x.fillStyle=g;x.strokeStyle='rgba(160,220,255,.6)';x.lineWidth=1.5;
@@ -643,8 +645,9 @@ function drawHud(x){
 function render(){
   const x=gx,{dpr,s,ox,oy}=LY;x.setTransform(1,0,0,1,0,0);x.drawImage(arenaImg,0,0);x.setTransform(dpr,0,0,dpr,0,0);
   const sh=G.shake>0?G.shake:0,sx=(Math.random()*2-1)*sh,sy=(Math.random()*2-1)*sh;
-  x.drawImage(tableImg,ox-(RAIL+20)*s+sx,oy-(RAIL+20)*s+sy,tableImg.width/dpr,tableImg.height/dpr);
   x.save();x.translate(ox+sx,oy+sy);x.scale(s,s);
+  if(LY.rot){x.translate(H,0);x.rotate(Math.PI/2)}
+  x.drawImage(tableImg,-(RAIL+20),-(RAIL+20),tableImg.width/(dpr*s),tableImg.height/(dpr*s));
   // goal flash
   if(G.flash>0){const f=G.flash,top=G.flashSide==='top';const col=top?'80,200,255':'255,70,100';
     const g=x.createRadialGradient(W/2,top?0:H,0,W/2,top?0:H,H*.6);g.addColorStop(0,`rgba(${col},${.7*f})`);g.addColorStop(1,`rgba(${col},0)`);
@@ -659,7 +662,7 @@ function render(){
   // ring ripples on hits
   for(const r of G.rings){const a=r.life/r.max;x.strokeStyle=r.c+(a*.8)+')';x.lineWidth=3*a;x.beginPath();x.arc(r.x,r.y,r.r+(1-a)*28,0,7);x.stroke()}
   drawBanner(x);
-  if(G.hint&&G.state==='intro'){txt(x,G.hint,W/2,H*.62,13,'#0a2758',null,null)}
+  if(G.hint&&G.state==='intro'){if(LY.rot){x.save();x.translate(W/2,CENTER);x.rotate(-Math.PI/2);txt(x,G.hint,0,95,14,'#0a2758',null,null);x.restore()}else txt(x,G.hint,W/2,H*.62,13,'#0a2758',null,null)}
   x.restore();
   drawHud(x);
 }
@@ -893,8 +896,9 @@ window.addEventListener('keydown',e=>{
   else if($('#setup').classList.contains('show'))$('#setup').classList.remove('show');
   else if(['difficulty','customize','settings','goodbye'].includes(curScreen)){showScreen('menu');Snd.play('calm')}
 });
-const onPointer=e=>{if(!LY.s)return;const off=e.pointerType==='touch'?TOUCH_OFF:0;pointer.x=(e.clientX-LY.ox)/LY.s;pointer.y=(e.clientY-LY.oy)/LY.s-off};
-window.addEventListener('pointermove',onPointer,{passive:true});window.addEventListener('pointerdown',onPointer,{passive:true});
+const onPointer=e=>{if(!LY.s)return;const u=(e.clientX-LY.ox)/LY.s,v=(e.clientY-LY.oy)/LY.s;
+  if(LY.rot){pointer.x=v;pointer.y=H-u}else{pointer.x=u;pointer.y=v-(e.pointerType==='touch'?TOUCH_OFF:0)}};
+window.addEventListener('onpointerrawupdate' in window?'pointerrawupdate':'pointermove',onPointer,{passive:true});if('onpointerrawupdate' in window)window.addEventListener('pointermove',e=>{if(e.pointerType!=='mouse')onPointer(e)},{passive:true});window.addEventListener('pointerdown',onPointer,{passive:true});
 window.addEventListener('contextmenu',e=>{if(G.state!=='idle')e.preventDefault()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 window.addEventListener('blur',()=>pause());
